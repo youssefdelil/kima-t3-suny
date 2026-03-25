@@ -1,0 +1,10 @@
+# macOS dev tool build artifacts
+*.log
+*.tmp
+.DS_Store
+
+# User config
+whitelist
+
+# Logs directory (runtime, not tracked)
+/var/log/
