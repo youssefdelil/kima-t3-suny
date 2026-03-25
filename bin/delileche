@@ -1,126 +1,112 @@
 #!/usr/bin/env bash
-# bin/delileche — Entry point: flag parsing, orchestration, and final report
-# delileche youcef — Enhanced macOS Developer Storage Cleanup Tool
+# bin/delileche — Entry point for delileche youcef — Enhanced macOS Cleanup CLI
+# Features: TUI, Heatmap, Profiles, Undo, Smart Scan, HTML Report, JSON output
 set -euo pipefail
 
-# ── Resolve lib directory ──────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/../lib"
 
-# shellcheck source=../lib/core/core.sh
 source "${LIB_DIR}/core/core.sh"
-
-# shellcheck source=../lib/core/utils.sh
 source "${LIB_DIR}/core/utils.sh"
-
-# shellcheck source=../lib/core/preflight.sh
 source "${LIB_DIR}/core/preflight.sh"
-
-# shellcheck source=../lib/modules/system/standard.sh
 source "${LIB_DIR}/modules/system/standard.sh"
-
-# shellcheck source=../lib/modules/system/deep.sh
 source "${LIB_DIR}/modules/system/deep.sh"
-
-# shellcheck source=../lib/modules/system/orphans.sh
 source "${LIB_DIR}/modules/system/orphans.sh"
-
-# shellcheck source=../lib/modules/system/brew.sh
 source "${LIB_DIR}/modules/system/brew.sh"
-
-# shellcheck source=../lib/modules/system/snapshots.sh
 source "${LIB_DIR}/modules/system/snapshots.sh"
-
-# shellcheck source=../lib/modules/user/standard.sh
 source "${LIB_DIR}/modules/user/standard.sh"
-
-# shellcheck source=../lib/modules/user/mail.sh
 source "${LIB_DIR}/modules/user/mail.sh"
-
-# shellcheck source=../lib/modules/user/browsers.sh
 source "${LIB_DIR}/modules/user/browsers.sh"
-
-# shellcheck source=../lib/modules/user/apps.sh
 source "${LIB_DIR}/modules/user/apps.sh"
-
-# shellcheck source=../lib/modules/dev/devtools.sh
 source "${LIB_DIR}/modules/dev/devtools.sh"
-
-# shellcheck source=../lib/modules/dev/xcode.sh
 source "${LIB_DIR}/modules/dev/xcode.sh"
-
-# shellcheck source=../lib/modules/dev/devops.sh
 source "${LIB_DIR}/modules/dev/devops.sh"
-
-# shellcheck source=../lib/modules/dev/docker.sh
 source "${LIB_DIR}/modules/dev/docker.sh"
-
-# shellcheck source=../lib/optimize/optimize.sh
 source "${LIB_DIR}/optimize/optimize.sh"
+source "${LIB_DIR}/tui/tui.sh"
+source "${LIB_DIR}/heatmap/heatmap.sh"
+source "${LIB_DIR}/profile/profile.sh"
+source "${LIB_DIR}/undo/undo.sh"
+source "${LIB_DIR}/scan/smart_scan.sh"
+source "${LIB_DIR}/report/html_report.sh"
 
-# ── ASCII Banner ──────────────────────────────────────────────────────────────
+# ── Additional feature flags ───────────────────────────────────────────────────
+export USE_TUI=${USE_TUI:-false}
+export SHOW_HEATMAP=${SHOW_HEATMAP:-false}
+export SHOW_SCAN=${SHOW_SCAN:-false}
+export SHOW_UNDO=${SHOW_UNDO:-false}
+export HTML_REPORT=${HTML_REPORT:-false}
+export PROFILE_NAME=${PROFILE_NAME:-""}
+export PROFILE_UI=${PROFILE_UI:-false}
+
+# ── Banner ─────────────────────────────────────────────────────────────────────
 _print_banner() {
-  if [[ -t 1 ]]; then
-    printf "\n${BOLD}${PURPLE}"
-    printf '  ██████╗ ███████╗██╗     ██╗██╗     ███████╗ ██████╗██╗  ██╗███████╗\n'
-    printf '  ██╔══██╗██╔════╝██║     ██║██║     ██╔════╝██╔════╝██║  ██║██╔════╝\n'
-    printf '  ██║  ██║█████╗  ██║     ██║██║     █████╗  ██║     ███████║█████╗  \n'
-    printf '  ██║  ██║██╔══╝  ██║     ██║██║     ██╔══╝  ██║     ██╔══██║██╔══╝  \n'
-    printf '  ██████╔╝███████╗███████╗██║███████╗███████╗╚██████╗██║  ██║███████╗\n'
-    printf '  ╚═════╝ ╚══════╝╚══════╝╚═╝╚══════╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝\n'
-    printf "${RESET}${DIM}                                    by youcef — v%s${RESET}\n\n" "$VERSION"
-  fi
+  [[ ! -t 1 ]] && return
+  printf "\n${BOLD}${PURPLE}"
+  printf '  ██████╗ ███████╗██╗     ██╗██╗     ███████╗ ██████╗██╗  ██╗███████╗\n'
+  printf '  ██╔══██╗██╔════╝██║     ██║██║     ██╔════╝██╔════╝██║  ██║██╔════╝\n'
+  printf '  ██║  ██║█████╗  ██║     ██║██║     █████╗  ██║     ███████║█████╗  \n'
+  printf '  ██║  ██║██╔══╝  ██║     ██║██║     ██╔══╝  ██║     ██╔══██║██╔══╝  \n'
+  printf '  ██████╔╝███████╗███████╗██║███████╗███████╗╚██████╗██║  ██║███████╗\n'
+  printf '  ╚═════╝ ╚══════╝╚══════╝╚═╝╚══════╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝\n'
+  printf "${RESET}${DIM}                                    by youcef — v%s${RESET}\n\n" "$VERSION"
 }
 
-# ── Help output ────────────────────────────────────────────────────────────────
+# ── Help ───────────────────────────────────────────────────────────────────────
 show_help() {
   _print_banner
   cat <<EOF
 ${BOLD}USAGE:${RESET}
   delileche [targets] [options]
 
-${BOLD}TARGETS:${RESET}
-  --system,  -S       Scan crash reports, .DS_Store, Trash, dev caches
-  --system-deep, -z   Deep system cleanup: rotated logs, old diagnostics
-  --xcode,   -x       Clean Xcode DerivedData, Archives, iOS DeviceSupport
-  --docker,  -d       Clean Docker containers, images, volumes, build cache
-  --devtools, -D      Clean node_modules, Rust target/, __pycache__, .venv, .tox, Gradle, Flutter
-  --snapshots, -s     Delete local Time Machine snapshots
-  --caches,  -c       Clear ~/Library/Caches, Zsh, browser caches, app caches
-  --mail,    -m       Clean old Mail downloads and recent-item metadata
-  --brew,    -b       Run brew cleanup and autoremove
-  --optimize, -O      Run system optimizations (DNS flush, LS rebuild, SQLite vacuum)
-  --all,     -a       Run all cleanup targets
+${BOLD}INTERACTIVE:${RESET}
+  --tui              Launch arrow-key module selector (default if no args given)
+  --scan             Smart scan — shows biggest wins with recommendations
+  --heatmap          ASCII disk usage heatmap of your top directories
+  --profile <name>   Apply a preset: ${CYAN}developer${RESET} | ${CYAN}designer${RESET} | ${CYAN}student${RESET}
+  --profile-menu     Interactive profile selector
+
+${BOLD}CLEANUP TARGETS:${RESET}
+  --system,  -S      .DS_Store, Trash, crash reports
+  --system-deep, -z  Rotated logs, old iOS backups
+  --xcode,   -x      DerivedData, Archives, DeviceSupport, Simulator
+  --docker,  -d      Docker containers, images, volumes, build cache
+  --devtools, -D     node_modules, Rust, Python (.venv/.tox), Gradle, Flutter
+  --snapshots, -s    Time Machine local snapshots
+  --caches,  -c      ~/Library/Caches, browsers (Arc/Chrome/Firefox/Safari/Brave), apps
+  --mail,    -m      Old Mail attachments
+  --brew,    -b      brew cleanup + autoremove
+  --optimize, -O     DNS flush, LaunchServices rebuild, SQLite vacuum
+  --all,     -a      All targets
 
 ${BOLD}OPTIONS:${RESET}
-  --dry-run,  -n      Preview what would be deleted (default with no flags)
-  --yes,      -y      Skip confirmation prompts and run live cleanup
-  --clean-orphans     Interactively remove orphaned app data (with confidence scores)
-  --devops-reset      Nuclear cleanup: all Docker assets and developer caches
-  --include-ml-models Include HuggingFace/Ollama model caches with --devops-reset
-  --json              Output summary report as JSON (stdout)
-  --stats             Show history of past runs and exit
-  --show-log          Print operation log and exit
-  --version,  -V      Print version and exit
-  --verbose,  -v      Show detailed per-item output
-  --help,     -h      Show this help
+  --dry-run,  -n     Preview only — no deletions (default)
+  --yes,      -y     Skip confirmation, run live cleanup
+  --verbose,  -v     Show per-item details
+  --json             Machine-readable JSON summary
+  --html             Generate visual HTML report (opens in browser)
+  --clean-orphans    Interactively remove orphaned app data (with confidence %)
+  --undo             Show what was deleted in last live cleanup
+  --devops-reset     Nuclear: all Docker + dev caches
+  --include-ml-models  Include HuggingFace/Ollama model caches
+  --stats            Show run history
+  --show-log         Print operation log
+  --version, -V      Print version
+  --help,    -h      Show this help
 
 ${BOLD}EXAMPLES:${RESET}
-  delileche                         Preview all cleanups (safe dry-run)
-  delileche --all --yes             Clean everything, no prompts
-  delileche --xcode --docker        Preview Xcode + Docker cleanup
-  delileche --system --dry-run -v   Verbose system-only dry-run
-  delileche --all --json            Machine-readable JSON summary
-  delileche --devtools               Find orphaned build artifacts
-  delileche --devops-reset --yes    Nuclear cleanup of dev toolchain
-  delileche --clean-orphans          Interactively remove orphaned app data
-  delileche --stats                  Show run history
-  delileche --show-log               Show deletion operation log
+  delileche                          Interactive TUI selector
+  delileche --scan                   Show biggest disk space wins
+  delileche --heatmap                Visual disk usage heatmap
+  delileche --profile developer      Dev preset (Xcode, Docker, node_modules)
+  delileche --all --dry-run          Preview everything
+  delileche --all --yes --html       Full live cleanup + open HTML report
+  delileche --xcode --docker --yes   Clean Xcode + Docker, no prompts
+  delileche --clean-orphans          Remove orphaned app data interactively
+  delileche --undo                   Review last cleanup deletions
+  delileche --stats                  Show past run history
 
-${YELLOW}${WARN}  No cleanup targets? Defaults to a safe --all --dry-run preview.${RESET}
-   Pass targets without --dry-run for Interactive Mode (prompts before deletion).
-   Add --yes to skip all prompts and run a live cleanup immediately.
-
+${YELLOW}${WARN}  Running without targets launches the TUI selector.${RESET}
 EOF
 }
 
@@ -146,7 +132,7 @@ set_default_targets() {
 }
 
 has_cleanup_target() {
-  [[ "$TARGET_SYSTEM"      == "true" ]] \
+  [[ "$TARGET_SYSTEM"       == "true" ]] \
     || [[ "$TARGET_XCODE"     == "true" ]] \
     || [[ "$TARGET_DOCKER"    == "true" ]] \
     || [[ "$TARGET_DEVTOOLS"  == "true" ]] \
@@ -161,40 +147,41 @@ has_cleanup_target() {
 
 # ── Flag parsing ───────────────────────────────────────────────────────────────
 parse_flags() {
+  local target_specified=false
+  local explicit_dry_run=false
+
   if [[ $# -eq 0 ]]; then
-    DRY_RUN=true
-    set_default_targets
-    log::warn "No flags provided. Running --all --dry-run by default."
+    USE_TUI=true
     return
   fi
 
-  local explicit_dry_run=false
-  local target_specified=false
-
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --system|-S)        TARGET_SYSTEM=true;       target_specified=true ;;
-      --system-deep|-z)   TARGET_SYSTEM_DEEP=true;  target_specified=true ;;
-      --xcode|-x)         TARGET_XCODE=true;        target_specified=true ;;
-      --docker|-d)        TARGET_DOCKER=true;        target_specified=true ;;
-      --devtools|-D)      TARGET_DEVTOOLS=true;      target_specified=true ;;
-      --snapshots|-s)     TARGET_SNAPSHOTS=true;     target_specified=true ;;
-      --caches|-c)        TARGET_CACHES=true;        target_specified=true ;;
-      --mail|-m)          TARGET_MAIL=true;          target_specified=true ;;
-      --brew|-b)          TARGET_BREW=true;          target_specified=true ;;
-      --optimize|-O)      TARGET_OPTIMIZE=true;      target_specified=true ;;
+      --system|-S)         TARGET_SYSTEM=true;       target_specified=true ;;
+      --system-deep|-z)    TARGET_SYSTEM_DEEP=true;  target_specified=true ;;
+      --xcode|-x)          TARGET_XCODE=true;        target_specified=true ;;
+      --docker|-d)         TARGET_DOCKER=true;        target_specified=true ;;
+      --devtools|-D)       TARGET_DEVTOOLS=true;      target_specified=true ;;
+      --snapshots|-s)      TARGET_SNAPSHOTS=true;     target_specified=true ;;
+      --caches|-c)         TARGET_CACHES=true;        target_specified=true ;;
+      --mail|-m)           TARGET_MAIL=true;          target_specified=true ;;
+      --brew|-b)           TARGET_BREW=true;          target_specified=true ;;
+      --optimize|-O)       TARGET_OPTIMIZE=true;      target_specified=true ;;
       --all|-a)
-        TARGET_SYSTEM=true
-        TARGET_XCODE=true
-        TARGET_DOCKER=true
-        TARGET_DEVTOOLS=true
-        TARGET_SNAPSHOTS=true
-        TARGET_CACHES=true
-        TARGET_MAIL=true
-        TARGET_SYSTEM_DEEP=true
-        TARGET_BREW=true
+        set_default_targets
         target_specified=true
         ;;
+      --tui)               USE_TUI=true ;;
+      --scan)              SHOW_SCAN=true ;;
+      --heatmap)           SHOW_HEATMAP=true ;;
+      --undo)              SHOW_UNDO=true ;;
+      --html)              HTML_REPORT=true ;;
+      --profile)
+        shift
+        PROFILE_NAME="${1:-}"
+        target_specified=true
+        ;;
+      --profile-menu)      PROFILE_UI=true ;;
       --clean-orphans)     CLEAN_ORPHANS=true ;;
       --devops-reset)      DEVOPS_RESET_MODE=true ;;
       --include-ml-models) INCLUDE_ML_MODELS=true ;;
@@ -215,17 +202,33 @@ parse_flags() {
     shift
   done
 
-  if [[ "$SHOW_OPERATION_LOG" == "true" ]] || [[ "$SHOW_VERSION" == "true" ]] || [[ "$SHOW_STATS" == "true" ]]; then
+  # Early-exit flags
+  if [[ "$SHOW_OPERATION_LOG" == "true" ]] \
+    || [[ "$SHOW_VERSION" == "true" ]] \
+    || [[ "$SHOW_STATS" == "true" ]] \
+    || [[ "$SHOW_UNDO" == "true" ]] \
+    || [[ "$SHOW_SCAN" == "true" ]] \
+    || [[ "$SHOW_HEATMAP" == "true" ]]; then
     return
   fi
 
-  if ! has_cleanup_target; then
-    set_default_targets
-    DRY_RUN=true
-    log::warn "No cleanup target selected. Running --all --dry-run by default."
+  # Profile
+  if [[ -n "$PROFILE_NAME" ]]; then
+    profile::apply "$PROFILE_NAME" || exit 1
+    return
+  fi
+  if [[ "$PROFILE_UI" == "true" ]]; then
+    profile::show_menu
     return
   fi
 
+  # TUI if no targets
+  if ! "$target_specified" 2>/dev/null && ! has_cleanup_target; then
+    USE_TUI=true
+    return
+  fi
+
+  # Live mode logic
   if [[ "$explicit_dry_run" == "true" ]]; then
     DRY_RUN=true
   elif [[ "$SKIP_CONFIRM" == "true" ]]; then
@@ -233,14 +236,14 @@ parse_flags() {
   else
     printf '\n%s%s  ⚠  You are about to delete files. This cannot be undone.%s\n' \
       "${BOLD}" "${YELLOW}" "${RESET}"
-    printf '   Run with --dry-run first to preview what will be removed.\n'
+    printf '   Run with --dry-run first to preview.\n'
     printf '   Continue with live cleanup? [y/N]: '
-    local _confirm
-    read -r _confirm
-    if [[ "$_confirm" =~ ^[Yy]$ ]]; then
+    local _c
+    read -r _c
+    if [[ "$_c" =~ ^[Yy]$ ]]; then
       DRY_RUN=false
     else
-      log::info "Aborted. Re-run with --dry-run to preview safely."
+      log::info "Aborted. Use --dry-run to preview safely."
       exit 0
     fi
   fi
@@ -254,7 +257,6 @@ print_report() {
 
   local mode_label
   mode_label="$([ "$DRY_RUN" == "true" ] && echo "DRY-RUN" || echo "LIVE")"
-
   local bar
   bar=$(printf '━%.0s' $(seq 1 72))
   local sep
@@ -266,7 +268,6 @@ print_report() {
   printf '  Mode: %s%s%s  |  Duration: %ss  |  v%s\n\n' \
     "${CYAN}" "$mode_label" "${RESET}" "$duration" "$VERSION"
 
-  # Column headers
   printf '  %s%-18s %-24s %10s %13s   %s%s\n' \
     "${BOLD}" "Category" "Module" "Found" "Reclaimable" "Status" "${RESET}"
   printf '  %s\n' "$sep"
@@ -276,58 +277,48 @@ print_report() {
   local module_count=${#MODULE_NAMES[@]}
   local prev_category=""
 
-  if (( module_count == 0 )); then
-    printf '  %s(no modules ran)%s\n' "${DIM}" "${RESET}"
-  else
-    for (( i=0; i<module_count; i++ )); do
-      local name="${MODULE_NAMES[$i]}"
-      local category="${MODULE_CATEGORIES[$i]}"
-      local scanned="${MODULE_SCANNED[$i]}"
-      local status="${MODULE_STATUS[$i]}"
-      local projected="${MODULE_PROJECTED[$i]:-0}"
-      local dur="${MODULE_DURATIONS[$i]:-}"
+  for (( i=0; i<module_count; i++ )); do
+    local name="${MODULE_NAMES[$i]}"
+    local category="${MODULE_CATEGORIES[$i]}"
+    local scanned="${MODULE_SCANNED[$i]}"
+    local status="${MODULE_STATUS[$i]}"
+    local projected="${MODULE_PROJECTED[$i]:-0}"
+    local dur="${MODULE_DURATIONS[$i]:-}"
 
-      total_scanned=$(( total_scanned + scanned ))
-      total_projected=$(( total_projected + projected ))
+    total_scanned=$(( total_scanned + scanned ))
+    total_projected=$(( total_projected + projected ))
 
-      local cat_display=""
-      if [[ "$category" != "$prev_category" ]]; then
-        cat_display="$category"
-        prev_category="$category"
-      fi
+    local cat_display=""
+    [[ "$category" != "$prev_category" ]] && cat_display="$category" && prev_category="$category"
 
-      local found_fmt="-"
-      (( scanned > 0 )) && found_fmt=$(utils::format_bytes "$scanned")
+    local found_fmt="-"
+    (( scanned > 0 )) && found_fmt=$(utils::format_bytes "$scanned")
+    local reclaimable_fmt="-"
+    (( projected > 0 )) && reclaimable_fmt=$(utils::format_bytes "$projected")
+    [[ "$status" == "review" ]] && reclaimable_fmt="0 B"
 
-      local reclaimable_fmt="-"
-      (( projected > 0 )) && reclaimable_fmt=$(utils::format_bytes "$projected")
-      [[ "$status" == "review" ]] && reclaimable_fmt="0 B"
+    local status_str
+    case "$status" in
+      clean)   status_str="${GREEN}✔ Clean${RESET}" ;;
+      skipped) status_str="${YELLOW}Skipped${RESET}" ;;
+      review)  status_str="${CYAN}Needs review${RESET}" ;;
+      done)    status_str="${GREEN}${CHECK} Done${RESET}" ;;
+      pending) status_str="${YELLOW}Pending${RESET}" ;;
+      *)       status_str="${DIM}${status}${RESET}" ;;
+    esac
 
-      local status_str
-      case "$status" in
-        clean)   status_str="${GREEN}✔ Clean${RESET}" ;;
-        skipped) status_str="${YELLOW}Skipped${RESET}" ;;
-        review)  status_str="${CYAN}Needs review${RESET}" ;;
-        done)    status_str="${GREEN}${CHECK} Done${RESET}" ;;
-        pending) status_str="${YELLOW}Pending${RESET}" ;;
-        *)       status_str="${DIM}${status}${RESET}" ;;
-      esac
+    local dur_str=""
+    [[ -n "$dur" && "$dur" != "0" ]] && dur_str="  ${DIM}${dur}s${RESET}"
 
-      local dur_str=""
-      [[ -n "$dur" && "$dur" != "0" ]] && dur_str="  ${DIM}${dur}s${RESET}"
-
-      printf '  %-18s %-24s %10s %13s   %s%s\n' \
-        "$cat_display" "$name" "$found_fmt" "$reclaimable_fmt" "$status_str" "$dur_str"
-    done
-  fi
+    printf '  %-18s %-24s %10s %13s   %s%s\n' \
+      "$cat_display" "$name" "$found_fmt" "$reclaimable_fmt" "$status_str" "$dur_str"
+  done
 
   printf '  %s\n' "$sep"
-  local total_found_fmt total_reclaimable_fmt
-  total_found_fmt=$(utils::format_bytes "$total_scanned")
-  total_reclaimable_fmt=$(utils::format_bytes "$total_projected")
-
   printf '  %s%-18s %-24s %10s %13s%s\n' \
-    "${BOLD}" "TOTALS" "" "$total_found_fmt" "$total_reclaimable_fmt" "${RESET}"
+    "${BOLD}" "TOTALS" "" \
+    "$(utils::format_bytes "$total_scanned")" \
+    "$(utils::format_bytes "$total_projected")" "${RESET}"
 
   printf '\n'
   local free_before_fmt free_after_fmt
@@ -335,35 +326,24 @@ print_report() {
   free_after_fmt=$(utils::format_bytes "$disk_after")
 
   if [[ "$DRY_RUN" == "true" ]]; then
-    local projected_total=$(( disk_before + total_projected ))
-    local projected_fmt
-    projected_fmt=$(utils::format_bytes "$projected_total")
     printf '  %sFree space:%s  %s → %s %s(projected)%s\n' \
-      "${BOLD}" "${RESET}" "$free_before_fmt" "$projected_fmt" "${DIM}" "${RESET}"
+      "${BOLD}" "${RESET}" "$free_before_fmt" \
+      "$(utils::format_bytes "$(( disk_before + total_projected ))")" "${DIM}" "${RESET}"
   else
-    local actual_freed=$(( disk_after - disk_before ))
-    [[ $actual_freed -lt 0 ]] && actual_freed=0
+    local freed=$(( disk_after - disk_before ))
+    [[ $freed -lt 0 ]] && freed=0
     printf '  %sFree space:%s  %s → %s  %s(%s freed)%s\n' \
       "${BOLD}" "${RESET}" "$free_before_fmt" "$free_after_fmt" \
-      "${GREEN}" "$(utils::format_bytes "$actual_freed")" "${RESET}"
+      "${GREEN}" "$(utils::format_bytes "$freed")" "${RESET}"
   fi
 
-  printf '  %sLog saved:%s   %s\n' "${BOLD}" "${RESET}" "$LOG_FILE"
-  printf '\n  %sStatus legend:%s\n' "${BOLD}" "${RESET}"
-  if [[ "$DRY_RUN" == "true" ]]; then
-    printf '  • Pending: items queued for deletion in a live run\n'
-    printf '  • ✔ Clean: module found nothing to delete\n'
-  else
-    printf '  • ✔ Done: module cleaned successfully\n'
-    printf '  • ✔ Clean: module was already clean\n'
-  fi
-  printf '  • Needs review: manual action required (e.g. --clean-orphans)\n'
-  printf '  • Skipped: prerequisite unavailable (e.g. brew, docker not installed)\n'
+  printf '  %sLog:     %s   %s\n' "${BOLD}" "${RESET}" "$LOG_FILE"
+  printf '\n  %sLegend:%s  Pending=dry-run queued · Done=cleaned · Skipped=unavailable · review=manual\n' "${BOLD}" "${RESET}"
   printf '%s%s%s%s\n\n' "${BOLD}" "${PURPLE}" "$bar" "${RESET}"
   log::success "Run complete."
 }
 
-# ── JSON summary ───────────────────────────────────────────────────────────────
+# ── JSON report ────────────────────────────────────────────────────────────────
 print_json_report() {
   local duration="$1"
   local disk_before="$2"
@@ -371,42 +351,29 @@ print_json_report() {
 
   local mode
   mode="$([ "$DRY_RUN" == "true" ] && echo "dry-run" || echo "live")"
-
-  local total_scanned=0
-  local total_projected=0
+  local total_s=0 total_p=0
   local module_count=${#MODULE_NAMES[@]}
 
   printf '{\n'
-  printf '  "tool": "delileche",\n'
-  printf '  "version": "%s",\n' "$VERSION"
-  printf '  "author": "%s",\n' "$AUTHOR"
-  printf '  "timestamp": "%s",\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-  printf '  "mode": "%s",\n' "$mode"
-  printf '  "duration_seconds": %s,\n' "$duration"
-  printf '  "disk_free_before_bytes": %s,\n' "$disk_before"
-  printf '  "disk_free_after_bytes": %s,\n' "$disk_after"
+  printf '  "tool": "delileche", "version": "%s", "author": "%s",\n' "$VERSION" "$AUTHOR"
+  printf '  "timestamp": "%s", "mode": "%s", "duration_seconds": %s,\n' \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$mode" "$duration"
+  printf '  "disk_free_before_bytes": %s, "disk_free_after_bytes": %s,\n' "$disk_before" "$disk_after"
   printf '  "modules": [\n'
 
   for (( i=0; i<module_count; i++ )); do
-    total_scanned=$(( total_scanned + MODULE_SCANNED[$i] ))
-    total_projected=$(( total_projected + MODULE_PROJECTED[$i] ))
+    total_s=$(( total_s + MODULE_SCANNED[$i] ))
+    total_p=$(( total_p + MODULE_PROJECTED[$i] ))
     local comma=","
     (( i == module_count - 1 )) && comma=""
-    printf '    {\n'
-    printf '      "name": "%s",\n' "$(json::escape "${MODULE_NAMES[$i]}")"
-    printf '      "category": "%s",\n' "$(json::escape "${MODULE_CATEGORIES[$i]}")"
-    printf '      "scanned_bytes": %s,\n' "${MODULE_SCANNED[$i]}"
-    printf '      "projected_bytes": %s,\n' "${MODULE_PROJECTED[$i]:-0}"
-    printf '      "status": "%s",\n' "${MODULE_STATUS[$i]}"
-    printf '      "duration_seconds": %s\n' "${MODULE_DURATIONS[$i]:-0}"
-    printf '    }%s\n' "$comma"
+    printf '    {"name":"%s","category":"%s","scanned_bytes":%s,"projected_bytes":%s,"status":"%s","duration_seconds":%s}%s\n' \
+      "$(json::escape "${MODULE_NAMES[$i]}")" "$(json::escape "${MODULE_CATEGORIES[$i]}")" \
+      "${MODULE_SCANNED[$i]}" "${MODULE_PROJECTED[$i]:-0}" \
+      "${MODULE_STATUS[$i]}" "${MODULE_DURATIONS[$i]:-0}" "$comma"
   done
 
   printf '  ],\n'
-  printf '  "totals": {\n'
-  printf '    "scanned_bytes": %s,\n' "$total_scanned"
-  printf '    "projected_bytes": %s\n' "$total_projected"
-  printf '  }\n'
+  printf '  "totals": {"scanned_bytes":%s,"projected_bytes":%s}\n' "$total_s" "$total_p"
   printf '}\n'
 }
 
@@ -414,29 +381,52 @@ print_json_report() {
 main() {
   parse_flags "$@"
 
-  if [[ "$SHOW_VERSION" == "true" ]]; then
-    show_version
-    exit 0
-  fi
-
-  if [[ "$SHOW_OPERATION_LOG" == "true" ]]; then
-    utils::show_operation_log
-    exit 0
-  fi
-
-  if [[ "$SHOW_STATS" == "true" ]]; then
-    utils::show_stats
-    exit 0
-  fi
+  # ── Housekeeping flags ───────────────────────────────────────────────────────
+  [[ "$SHOW_VERSION" == "true" ]]       && show_version && exit 0
+  [[ "$SHOW_OPERATION_LOG" == "true" ]] && utils::show_operation_log && exit 0
+  [[ "$SHOW_STATS" == "true" ]]         && utils::show_stats && exit 0
+  [[ "$SHOW_UNDO" == "true" ]]          && undo::show && exit 0
 
   utils::check_macos
   utils::load_whitelist
 
+  # ── Single-feature modes (no cleanup run) ────────────────────────────────────
+  if [[ "$SHOW_SCAN" == "true" ]]; then
+    _print_banner
+    smart_scan::run
+    exit 0
+  fi
+
+  if [[ "$SHOW_HEATMAP" == "true" ]]; then
+    _print_banner
+    heatmap::run
+    exit 0
+  fi
+
+  # ── Profile menu (sets targets, then falls through to TUI or run) ─────────────
+  if [[ "$PROFILE_UI" == "true" ]]; then
+    _print_banner
+    profile::show_menu
+    [[ ! has_cleanup_target ]] && exit 0
+  fi
+
+  # ── Interactive TUI ───────────────────────────────────────────────────────────
+  if [[ "$USE_TUI" == "true" ]]; then
+    if tui::run; then
+      # TUI confirmed — apply dry-run by default unless --yes was passed
+      [[ "$SKIP_CONFIRM" != "true" ]] && DRY_RUN=true
+    else
+      exit 0
+    fi
+  fi
+
   local start_time
   start_time=$(date +%s)
 
+  # Print system context (non-JSON mode)
   if [[ "$JSON_OUTPUT" != "true" ]]; then
     _print_banner
+    profile::describe
     utils::print_system_context
   fi
 
@@ -447,6 +437,7 @@ main() {
         "${BOLD}" "${RED}" "${RESET}"
     fi
     preflight::run
+    undo::begin_session
   fi
 
   local disk_before
@@ -456,27 +447,25 @@ main() {
     local module_name="$1"
     local module_fn="$2"
     shift 2
-    if ! "$module_fn" "$@"; then
-      log::warn "Module '${module_name}' encountered an error — continuing."
-    fi
+    "$module_fn" "$@" || log::warn "Module '${module_name}' encountered an error — continuing."
   }
 
-  # ── System ────────────────────────────────────────────────────────────────
+  # ── System ────────────────────────────────────────────────────────────────────
   [[ "$JSON_OUTPUT" != "true" ]] && log::category "System"
   run_module "System" system::clean
   [[ "$TARGET_SYSTEM_DEEP" == "true" ]] && run_module "System Deep" system_deep::clean
   run_module "Orphans" orphans::clean
 
-  # ── Developer Tools ───────────────────────────────────────────────────────
-  if [[ "$TARGET_XCODE" == "true" ]] || [[ "$TARGET_DOCKER" == "true" ]] || [[ "$TARGET_DEVTOOLS" == "true" ]]; then
+  # ── Developer Tools ───────────────────────────────────────────────────────────
+  if [[ "$TARGET_XCODE" == "true" || "$TARGET_DOCKER" == "true" || "$TARGET_DEVTOOLS" == "true" ]]; then
     [[ "$JSON_OUTPUT" != "true" ]] && log::category "Developer Tools"
     [[ "$TARGET_XCODE" == "true" ]]    && run_module "Xcode" xcode::clean
     [[ "$TARGET_DOCKER" == "true" ]]   && run_module "Docker" docker::clean
     [[ "$TARGET_DEVTOOLS" == "true" ]] && run_module "Developer Tools" devtools::clean
   fi
 
-  # ── Caches & Logs ─────────────────────────────────────────────────────────
-  if [[ "$TARGET_CACHES" == "true" ]] || [[ "$TARGET_BREW" == "true" ]] || [[ "$TARGET_MAIL" == "true" ]]; then
+  # ── Caches & Logs ─────────────────────────────────────────────────────────────
+  if [[ "$TARGET_CACHES" == "true" || "$TARGET_BREW" == "true" || "$TARGET_MAIL" == "true" ]]; then
     [[ "$JSON_OUTPUT" != "true" ]] && log::category "Caches & Logs"
     if [[ "$TARGET_CACHES" == "true" ]]; then
       run_module "Caches" caches::clean
@@ -487,19 +476,19 @@ main() {
     [[ "$TARGET_BREW" == "true" ]] && run_module "Homebrew" brew::clean
   fi
 
-  # ── DevOps Reset ─────────────────────────────────────────────────────────
+  # ── DevOps Reset ──────────────────────────────────────────────────────────────
   if [[ "$DEVOPS_RESET_MODE" == "true" ]]; then
-    [[ "$JSON_OUTPUT" != "true" ]] && log::category "Developer Tools"
+    [[ "$JSON_OUTPUT" != "true" ]] && log::category "DevOps Reset"
     run_module "DevOps Reset" devops_reset::run
   fi
 
-  # ── Storage Management ────────────────────────────────────────────────────
+  # ── Storage Management ────────────────────────────────────────────────────────
   if [[ "$TARGET_SNAPSHOTS" == "true" ]]; then
     [[ "$JSON_OUTPUT" != "true" ]] && log::category "Storage Management"
     run_module "Snapshots" snapshots::clean
   fi
 
-  # ── Optimization ─────────────────────────────────────────────────────────
+  # ── Optimization ──────────────────────────────────────────────────────────────
   if [[ "${TARGET_OPTIMIZE:-false}" == "true" ]]; then
     [[ "$JSON_OUTPUT" != "true" ]] && log::category "Optimization"
     run_module "Optimize" optimize::run
@@ -507,22 +496,29 @@ main() {
 
   local disk_after
   disk_after=$(utils::get_free_bytes)
-
   local end_time
   end_time=$(date +%s)
   local duration=$(( end_time - start_time ))
 
-  # Save stats
-  local freed_bytes=$(( disk_after - disk_before ))
-  [[ $freed_bytes -lt 0 ]] && freed_bytes=$TOTAL_FREED
-  utils::save_stats "$([ "$DRY_RUN" == "true" ] && echo "dry-run" || echo "live")" \
-    "$freed_bytes" "$duration" "${#MODULE_NAMES[@]}"
+  # Finalize undo record
+  [[ "$DRY_RUN" != "true" ]] && undo::finalize_session
 
-  # Output
+  # Save stats
+  local freed=$(( disk_after - disk_before ))
+  [[ $freed -lt 0 ]] && freed=$TOTAL_FREED
+  utils::save_stats "$([ "$DRY_RUN" == "true" ] && echo "dry-run" || echo "live")" \
+    "$freed" "$duration" "${#MODULE_NAMES[@]}"
+
+  # ── Output ────────────────────────────────────────────────────────────────────
   if [[ "$JSON_OUTPUT" == "true" ]]; then
     print_json_report "$duration" "$disk_before" "$disk_after"
   else
     print_report "$duration" "$disk_before" "$disk_after"
+  fi
+
+  # HTML report
+  if [[ "$HTML_REPORT" == "true" ]]; then
+    html_report::generate "$duration" "$disk_before" "$disk_after"
   fi
 }
 
